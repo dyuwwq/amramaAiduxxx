@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIDUX AR Навигатор</title>
+
+<!-- A-Frame + AR.js -->
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+
+<!-- CSS -->
+<link rel="stylesheet" href="style.css">
+<style>
+body { margin: 0; overflow: hidden; font-family: sans-serif; }
+
+/* Панель интерфейса */
+#ui-panel {
+    position: fixed; top: 15px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; display: flex; flex-wrap: wrap; gap: 8px; width: 95%; max-width: 500px;
+    background: rgba(255, 255, 255, 0.95); padding: 10px;
+    border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    justify-content: space-between; align-items: center;
+}
+#lang-select { padding: 8px; border-radius: 8px; border: 1px solid #ccc; font-weight: bold; background: white; }
+#target-input { flex: 1; min-width: 120px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 16px; }
+.btn-group { display: flex; gap: 5px; }
+button { padding: 10px 15px; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+#mic-btn { background: #ff3b30; color: white; }
+#go-btn { background: #007aff; color: white; font-weight: bold; }
+
+/* Статус бар */
+#status-bar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: rgba(0, 0, 0, 0.8); color: white;
+    padding: 12px 20px; border-radius: 20px; text-align: center; width: 85%; max-width: 400px;
+    font-size: 14px;
+}
+</style>
+<link rel="manifest" href="manifest.webmanifest"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="format-detection" content="telephone=no"></head>
+<body>
+
+<!-- Панель управления -->
+<div id="ui-panel">
+    <select id="lang-select">
+        <option value="ru-RU">🇷🇺 RU</option>
+        <option value="kk-KZ">🇰🇿 KZ</option>
+        <option value="en-US">🇬🇧 EN</option>
+    </select>
+    <input type="text" id="target-input" placeholder="Куда идем?">
+    <div class="btn-group">
+        <button id="mic-btn">🎤</button>
+        <button id="go-btn">Поиск</button>
+    </div>
+</div>
+
+<div id="status-bar">Ожидание GPS...</div>
+
+<!-- AR сцена -->
+<a-scene vr-mode-ui="enabled: false" arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-assets>
+        <a-asset-item id="model-buildings" src="doomr.glb"></a-asset-item>
+        <a-asset-item id="model-roads" src="doomrway.glb"></a-asset-item>
+    </a-assets>
+
+    <a-camera gps-camera rotation-reader></a-camera>
+
+    <a-entity gltf-model="#model-buildings" gps-entity-place="latitude: 53.7471197556; longitude: 62.0609702026;" scale="1 1 1"></a-entity>
+    <a-entity gltf-model="#model-roads" gps-entity-place="latitude: 53.7471197556; longitude: 62.0609702026;" scale="1 1 1"></a-entity>
+
+    <a-entity id="ar-arrow" geometry="primitive: cone; radiusBottom: 0.5; height: 1.5" 
+        material="color: #00FF00; opacity: 0.8" rotation="180 0 0" position="0 2 0" visible="false">
+        <a-animation attribute="position" to="0 2.5 0" direction="alternate" dur="1000" repeat="indefinite"></a-animation>
+    </a-entity>
+</a-scene>
+
+<script>
+// База данных мест
+const locationsDB = [
+    { meshName: "Akimat", lat: 53.747230, lng: 62.063310, aliases: ["акимат", "akimat", "әкімдік", "әкімшілік"] },
+    { meshName: "css", lat: 53.746552, lng: 62.061850, aliases: ["дюсш", "css", "спортшкола", "sports school", "спорт мектебі"] },
+    { meshName: "House_of_culture", lat: 53.746725, lng: 62.062435, aliases: ["дом культуры", "house of culture", "мәдениет үйі", "дк"] },
+    { meshName: "mosque", lat: 53.749788, lng: 62.053696, aliases: ["мечеть", "mosque", "мешіт"] },
+    { meshName: "school_№1", lat: 53.748110, lng: 62.053638, aliases: ["школа 1", "школа №1", "school 1", "1 мектеп", "бірінші мектеп"] },
+    { meshName: "school_№2", lat: 53.749254, lng: 62.070684, aliases: ["школа 2", "школа №2", "school 2", "2 мектеп", "екінші мектеп"] }
+];
+
+// Голосовые ответы
+const voiceResponses = {
+    "ru-RU": { found: "Маршрут построен. Следуйте за зелеными стрелками.", notFound: "Извините, я не знаю такого адреса.", gpsWait: "Ожидаю сигнал GPS.", arrived: "Вы прибыли." },
+    "kk-KZ": { found: "Бағдар құрылды. Жасыл нұсқағыштармен жүріңіз.", notFound: "Кешіріңіз, мен мұндай мекенжайды білмеймін.", gpsWait: "GPS күтудемін.", arrived: "Сіз жеттіңіз." },
+    "en-US": { found: "Route built. Follow the green arrows.", notFound: "Sorry, I don't know this address.", gpsWait: "Waiting for GPS.", arrived: "You have arrived." }
+};
+
+// Переменные
+let currentRoute = [], currentStep = 0, userLocation = null;
+const ARRIVAL_DISTANCE = 5;
+const uiInput = document.getElementById('target-input');
+const langSelect = document.getElementById('lang-select');
+const statusBar = document.getElementById('status-bar');
+const arArrow = document.getElementById('ar-arrow');
+
+// Голосовой ввод
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+function speak(type) {
+    const lang = langSelect.value;
+    const text = voiceResponses[lang][type];
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang;
+    window.speechSynthesis.speak(utter);
+}
+
+if (recognition) {
+    recognition.onresult = (event) => {
+        const voiceText = event.results[0][0].transcript.toLowerCase().trim();
+        uiInput.value = voiceText;
+        processSearch(voiceText);
+    };
+    recognition.onend = () => { uiInput.placeholder = "Куда идем?"; }
+}
+
+document.getElementById('mic-btn').addEventListener('click', () => {
+    if (!recognition) { alert("Ваш браузер не поддерживает голосовой ввод."); return; }
+    recognition.lang = langSelect.value;
+    uiInput.placeholder = "Слушаю...";
+    recognition.start();
+});
+
+document.getElementById('go-btn').addEventListener('click', () => {
+    processSearch(uiInput.value.toLowerCase().trim());
+});
+
+// Поиск по синонимам
+function processSearch(query) {
+    const cleanQuery = query.replace(/[.,]/g, '').trim(); 
+    let target = null;
+    for (const loc of locationsDB) if (loc.aliases.includes(cleanQuery)) { target = loc; break; }
+
+    if (target) {
+        if (!userLocation) { speak("gpsWait"); statusBar.innerText="Нет сигнала GPS. Подождите."; return; }
+        speak("found");
+        buildRouteOSRM(userLocation.lat, userLocation.lng, target.lat, target.lng);
+    } else {
+        speak("notFound");
+        statusBar.innerText = "Адрес не найден";
+    }
+}
+
+// OSRM маршрут
+async function buildRouteOSRM(sLat, sLng, eLat, eLng) {
+    statusBar.innerText = "Прокладываю маршрут...";
+    const url = `https://router.project-osrm.org/route/v1/foot/${sLng},${sLat};${eLng},${eLat}?overview=full&geometries=geojson`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.code === 'Ok') {
+            currentRoute = data.routes[0].geometry.coordinates.map(c => ({ lat: c[1], lng: c[0] }));
+            currentStep = 0;
+            updateArrowToNextPoint();
+        } else statusBar.innerText = "Не удалось проложить путь";
+    } catch (err) { console.error(err); statusBar.innerText="Ошибка сети"; }
+}
+
+// AR-стрелка
+function updateArrowToNextPoint() {
+    if (currentStep < currentRoute.length) {
+        const point = currentRoute[currentStep];
+        arArrow.setAttribute('gps-entity-place', `latitude: ${point.lat}; longitude: ${point.lng}`);
+        arArrow.setAttribute('visible', 'true');
+        statusBar.innerText = `Двигайтесь к стрелке (${currentStep+1} из ${currentRoute.length})`;
+    } else {
+        arArrow.setAttribute('visible','false');
+        statusBar.innerText="Вы прибыли на место!";
+        speak("arrived");
+        currentRoute=[];
+    }
+}
+
+// GPS слежение
+navigator.geolocation.watchPosition((pos) => {
+    userLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    if (currentRoute.length === 0) { statusBar.innerText="GPS найден. Готов к работе."; return; }
+    const target = currentRoute[currentStep];
+    const distance = getDistance(userLocation.lat, userLocation.lng, target.lat, target.lng);
+    if (distance < ARRIVAL_DISTANCE) { currentStep++; updateArrowToNextPoint(); }
+}, (err) => { console.error(err); statusBar.innerText="Включите GPS!"; }, { enableHighAccuracy: true });
+
+// Гаверсинус
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3;
+    const dLat = (lat2 - lat1)*Math.PI/180;
+    const dLon = (lon2 - lon1)*Math.PI/180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+</script>
+
+<script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script></body>
+</html>
