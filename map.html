@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>AIDUX — 3D World Map</title>
+<link href="https://unpkg.com/maplibre-gl@5.7.0/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5.7.0/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="style.css">
+<style>
+body{overflow:hidden;background:#050b08}.map-shell{position:fixed;inset:76px 0 0}.map{position:absolute;inset:0}
+.map-ui{position:absolute;z-index:20;left:18px;top:18px;width:min(410px,calc(100% - 36px));display:grid;gap:10px}
+.panel{background:rgba(7,17,13,.88);border:1px solid rgba(255,255,255,.11);backdrop-filter:blur(20px);box-shadow:0 18px 55px rgba(0,0,0,.3);border-radius:20px;padding:12px}
+.search{display:flex;gap:8px}.search input{min-width:0;flex:1;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.06);color:#fff;border-radius:13px;padding:13px 14px;outline:none}.search button{border:0;background:#36d36f;color:#061109;border-radius:13px;font-weight:900;padding:0 16px}
+.quick{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}.quick button,.map-actions button{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:#dce7df;border-radius:12px;padding:10px 7px;font-size:.78rem}.quick button:hover,.map-actions button:hover{background:rgba(54,211,111,.12)}
+.categories{display:flex;gap:6px;overflow:auto;padding-bottom:2px;margin-top:8px}.categories button{white-space:nowrap;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.04);color:#dce7df;border-radius:999px;padding:8px 10px;font-size:.76rem}
+.place-search{margin-top:10px;padding-top:11px;border-top:1px solid rgba(255,255,255,.07)}
+.place-search-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px}
+.place-search-head strong{font-size:.86rem}.place-search-head span{font-size:.7rem;color:#84968b}
+.place-query{display:flex;gap:7px}.place-query input{min-width:0;flex:1;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.06);color:#fff;border-radius:12px;padding:11px 12px;outline:none}
+.place-query button{border:0;background:#36d36f;color:#061109;border-radius:12px;font-weight:900;padding:0 13px}
+.place-presets{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:7px}
+.place-presets button{border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.045);color:#dce7df;border-radius:11px;padding:9px 5px;font-size:.72rem;line-height:1.15}
+.place-presets button:hover,.place-presets button.active{background:rgba(54,211,111,.15);border-color:rgba(54,211,111,.35);color:#fff}
+.place-hint{margin-top:7px;color:#829389;font-size:.69rem}
+.place-result{position:relative}.place-distance{float:right;color:#9cffb2;font-size:.72rem;font-weight:800}
+@media(max-width:620px){.place-presets{grid-template-columns:repeat(2,1fr)}.place-query button{padding:0 11px}}
+
+.info{display:flex;justify-content:space-between;gap:12px;align-items:center}.info small{color:#8fa096}.info strong{font-size:.88rem}
+.map-tools{position:absolute;right:18px;top:18px;z-index:20;display:grid;gap:8px}.round{width:46px;height:46px;border:1px solid rgba(255,255,255,.15);border-radius:14px;background:rgba(7,17,13,.9);color:#fff;font-size:18px;backdrop-filter:blur(12px)}
+.bottom-card{position:absolute;z-index:20;left:18px;bottom:18px;width:min(410px,calc(100% - 36px));background:rgba(7,17,13,.92);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:15px;backdrop-filter:blur(20px)}
+.route-row{display:flex;gap:12px;align-items:center}.route-dot{width:11px;height:11px;border-radius:50%;background:#36d36f;box-shadow:0 0 0 6px rgba(54,211,111,.1)}.route-line{height:24px;border-left:1px dashed rgba(156,255,178,.35);margin-left:5px}.route-dest{width:11px;height:11px;border-radius:50%;background:#fff;display:block;box-shadow:0 0 0 5px rgba(255,255,255,.08)}
+.route-results{display:none;margin-top:8px;max-height:240px;overflow:auto}.result{padding:11px 12px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);border-radius:12px;margin-top:6px;cursor:pointer}.result:hover{background:rgba(54,211,111,.1)}.result b{display:block;font-size:.9rem}.result span{display:block;color:#899a90;font-size:.76rem;margin-top:2px}
+.route-actions{display:none;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.route-actions button{padding:11px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.05);color:#fff}.route-actions button.active{background:#36d36f;color:#041008}
+.map-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}.map-actions button{font-size:.75rem}
+.favorite{color:#ffd86b!important}
+.globe-badge{position:absolute;z-index:12;right:18px;bottom:18px;background:rgba(7,17,13,.82);border:1px solid rgba(255,255,255,.1);padding:8px 11px;border-radius:999px;color:#bcd0c3;font-size:.72rem;backdrop-filter:blur(12px)}
+.marker-pin{width:18px;height:18px;border-radius:50%;background:#36d36f;border:3px solid #eaffef;box-shadow:0 0 0 7px rgba(54,211,111,.18),0 5px 18px rgba(0,0,0,.35)}
+@media(max-width:620px){
+ .map-shell{inset:64px 0 0}.map-ui{top:10px;left:10px;width:calc(100% - 20px)}.map-tools{right:10px;top:140px}.bottom-card{left:10px;bottom:10px;width:calc(100% - 20px);padding:13px}
+ .quick{grid-template-columns:1fr 1fr}.quick button:nth-child(3){grid-column:1/-1}.globe-badge{right:10px;bottom:92px}
+}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#07110d">
+</head>
+<body>
+<header class="topbar"><div class="shell topbar-inner">
+ <a class="brand" href="index.html"><span class="brand-mark">⌖</span>AIDUX</a>
+ <nav class="nav"><a href="index.html">Главная</a><a class="active" href="map.html">3D-карта</a><a href="ar-nav.html">AR-навигация</a><a href="vr.html">VR</a><a class="nav-ai" href="ai-chat.html">✦ AIDUX AI</a><a href="about.html">О проекте</a></nav>
+ <button class="mobile-menu" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+</div></header>
+
+<div class="map-shell">
+ <div id="map" class="map"></div>
+
+ <div class="map-ui">
+  <div class="panel">
+   <div class="search"><input id="target-input" autocomplete="off" placeholder="Город, улица, место…"><button id="go-btn">Найти</button></div>
+   <div class="quick">
+    <button id="locateBtn">◎ Моё местоположение</button>
+    <button id="arBtn">◈ AR-маршрут</button>
+    <button id="shareBtn">↗ Поделиться</button>
+   </div>
+   <div class="categories">
+    <button data-cat="кафе">☕ Кафе</button><button data-cat="ресторан">🍴 Рестораны</button><button data-cat="аптека">💊 Аптеки</button><button data-cat="банкомат">🏧 Банкоматы</button><button data-cat="достопримечательность">📍 Достопримечательности</button>
+   </div>
+   <div class="place-search">
+    <div class="place-search-head"><strong>✦ Поиск мест рядом</strong><span id="placeScope">по GPS</span></div>
+    <div class="place-query"><input id="placeInput" autocomplete="off" placeholder="Например: где поесть…"><button id="placeGo">Искать</button></div>
+    <div class="place-presets">
+     <button data-place="food">🍴 Где поесть</button>
+     <button data-place="billiards">🎱 Бильярд</button>
+     <button data-place="birthday">🎂 День рождения</button>
+     <button data-place="coffee">☕ Кофе</button>
+     <button data-place="sport">🏀 Спорт</button>
+     <button data-place="entertainment">🎮 Развлечения</button>
+    </div>
+    <div class="place-hint">Выбери категорию — AIDUX найдёт подходящие места поблизости и покажет их на карте.</div>
+   </div>
+   <div id="results" class="route-results"></div>
+   <div id="routeActions" class="route-actions"><button id="driveBtn" class="active">🚗 Авто</button><button id="walkBtn">🚶 Пешком</button></div>
+   <div class="map-actions"><button id="globeBtn">🌍 Глобус</button><button id="terrainBtn">⛰️ 3D-рельеф: ВКЛ</button><button id="buildingsBtn">🏙️ 3D-здания</button><button id="favoritesBtn">★ Избранное</button></div>
+  </div>
+  <div class="panel info"><div><small id="statusLabel">Статус</small><br><strong id="status">3D-глобус готов</strong></div><span class="pill" id="modePill">GLOBE</span></div>
+ </div>
+
+ <div class="map-tools"><button class="round" id="zoomIn">+</button><button class="round" id="zoomOut">−</button><button class="round" id="reset">🌍</button><button class="round" id="pitch">3D</button></div>
+ <div class="bottom-card"><div class="kicker">AIDUX WORLD</div><div class="route-row" style="margin-top:8px"><span class="route-dot"></span><div><strong id="placeTitle">Мировая карта</strong><div class="route-line"></div><span class="route-dest"></span></div><div><strong id="destName">Выберите место</strong><div id="routeMeta" style="color:#8fa096;font-size:.82rem">Поиск, 3D-рельеф, маршруты и AR</div></div></div></div>
+ <div class="globe-badge">🌐 OpenStreetMap · OpenFreeMap · MapLibre</div>
+</div>
+
+<script>
+const statusEl=document.getElementById('status'), destEl=document.getElementById('destName'), metaEl=document.getElementById('routeMeta');
+const input=document.getElementById('target-input'), results=document.getElementById('results'), actions=document.getElementById('routeActions');
+let userPos=null,destination=null,routeProfile='driving',routeMarker=null,placeMarkers=[],terrainOn=true,globeOn=true,buildingOn=false,routeSeq=0;
+const WORLD=[0,20], KOSTANAY=[63.6246,53.2144];
+
+const map=new maplibregl.Map({
+ container:'map',
+ style:'https://tiles.openfreemap.org/styles/liberty',
+ center:WORLD, zoom:1.35, pitch:18, bearing:0, maxPitch:85,
+ attributionControl:false, canvasContextAttributes:{antialias:true}
+});
+map.addControl(new maplibregl.NavigationControl({showCompass:true,visualizePitch:true}),'bottom-right');
+
+function setStatus(t){statusEl.textContent=t}
+function formatDistance(m){return m<1000?Math.round(m)+' м':(m/1000).toFixed(1)+' км'}
+function formatTime(sec){const min=Math.round(sec/60);return min<60?`${min} мин`:`${Math.floor(min/60)} ч ${min%60} мин`}
+function dist(a,b){const R=6371000,p1=a.lat*Math.PI/180,p2=b.lat*Math.PI/180,dp=(b.lat-a.lat)*Math.PI/180,dl=(b.lng-a.lng)*Math.PI/180,x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x))}
+function addTerrain(){
+ if(map.getSource('aidux-terrain')) return;
+ map.addSource('aidux-terrain',{type:'raster-dem',url:'https://tiles.mapterhorn.com/tilejson.json',tileSize:256,maxzoom:14});
+ map.setTerrain({source:'aidux-terrain',exaggeration:1.12});
+}
+function removeTerrain(){try{map.setTerrain(null)}catch(e){}}
+function addBuildings(){
+ const style=map.getStyle();
+ if(!style.sources?.openmaptiles || map.getLayer('aidux-3d-buildings')) return;
+ try{
+  map.addLayer({id:'aidux-3d-buildings',type:'fill-extrusion',source:'openmaptiles','source-layer':'building',minzoom:14,
+   filter:['!=',['get','hide_3d'],'true'],
+   paint:{'fill-extrusion-color':['interpolate',['linear'],['coalesce',['get','render_height'],0],0,'#21402d',30,'#36d36f',120,'#9cffb2'],'fill-extrusion-height':['coalesce',['get','render_height'],3],'fill-extrusion-base':['coalesce',['get','render_min_height'],0],'fill-extrusion-opacity':.82}});
+  buildingOn=true;document.getElementById('buildingsBtn').textContent='🏙️ 3D-здания: ВКЛ';
+ }catch(e){console.warn('3D buildings unavailable',e);setStatus('3D-здания недоступны в этом стиле')}
+}
+function removeBuildings(){if(map.getLayer('aidux-3d-buildings'))map.removeLayer('aidux-3d-buildings');buildingOn=false;document.getElementById('buildingsBtn').textContent='🏙️ 3D-здания'}
+function setProjection(globe){
+ globeOn=globe;
+ try{map.setProjection({type:globe?'globe':'mercator'});}catch(e){console.warn(e)}
+ document.getElementById('modePill').textContent=globe?'GLOBE':'3D MERCATOR';
+ document.getElementById('globeBtn').textContent=globe?'🌍 Глобус':'🗺️ Плоская карта';
+}
+function clearRoute(){if(map.getLayer('route-line'))map.removeLayer('route-line');if(map.getSource('route'))map.removeSource('route')}
+async function getUserLocation(){return new Promise((resolve,reject)=>{if(!navigator.geolocation)return reject(new Error('GPS недоступен'));navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),reject,{enableHighAccuracy:true,timeout:12000,maximumAge:10000})})}
+async function geocode(q){
+ results.style.display='block';results.innerHTML='<div class="result">🔎 Ищем…</div>';
+ const url='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&q='+encodeURIComponent(q);
+ const r=await fetch(url,{headers:{Accept:'application/json'}});if(!r.ok)throw new Error('search');return r.json();
+}
+function showResults(items){
+ results.innerHTML='';if(!items.length){results.innerHTML='<div class="result"><b>Ничего не найдено</b><span>Добавь город, улицу или страну.</span></div>';return}
+ items.forEach(item=>{const d=document.createElement('div');d.className='result';d.innerHTML=`<b>${item.name||item.display_name.split(',')[0]}</b><span>${item.display_name}</span>`;d.onclick=()=>selectDestination(item);results.appendChild(d)})
+}
+function selectDestination(item){
+ destination={lat:+item.lat,lng:+item.lon,name:item.name||item.display_name.split(',')[0],full:item.display_name};
+ destEl.textContent=destination.name;metaEl.textContent='Маршрут можно построить от GPS';results.style.display='none';
+ map.flyTo({center:[destination.lng,destination.lat],zoom:16,pitch:58,duration:1000}); addDestinationMarker(destination); actions.style.display='grid';
+}
+function addDestinationMarker(p){
+ if(routeMarker)routeMarker.remove();
+ const el=document.createElement('div');el.className='marker-pin';routeMarker=new maplibregl.Marker({element:el}).setLngLat([p.lng,p.lat]).addTo(map);
+}
+function showPlaceMarkers(items){
+ placeMarkers.forEach(m=>m.remove());placeMarkers=[];
+ items.forEach(item=>{const p={lat:+item.lat,lng:+item.lon,name:item.name||item.display_name.split(',')[0],full:item.display_name};const el=document.createElement('div');el.className='marker-pin';const m=new maplibregl.Marker({element:el}).setLngLat([p.lng,p.lat]).setPopup(new maplibregl.Popup({offset:12}).setHTML(`<strong>${escapeHtml(p.name)}</strong><br><span style="font-size:12px;color:#68756d">${escapeHtml(p.full)}</span><br><button onclick='window.aiduxSelect(${p.lat},${p.lng},${JSON.stringify(p.name)})' style="margin-top:8px;padding:6px 9px;border-radius:8px;border:0;background:#36d36f">Маршрут</button>`)).addTo(map);placeMarkers.push(m)})
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]))}
+window.aiduxSelect=(lat,lng,name)=>selectDestination({lat,lng,name,display_name:name});
+
+const PLACE_INTENTS={
+ food:{label:'Где поесть',emoji:'🍴',queries:['restaurant','cafe','fast food']},
+ billiards:{label:'Бильярд',emoji:'🎱',queries:['бильярд','billiards','pool hall']},
+ birthday:{label:'День рождения',emoji:'🎂',queries:['банкетный зал','event venue','restaurant']},
+ coffee:{label:'Кофе',emoji:'☕',queries:['cafe','coffee shop']},
+ sport:{label:'Спорт',emoji:'🏀',queries:['sports centre','fitness centre','gym']},
+ entertainment:{label:'Развлечения',emoji:'🎮',queries:['entertainment','bowling','cinema','amusement']}
+};
+let placeIntent=null;
+
+async function ensurePlaceLocation(){
+ if(userPos) return userPos;
+ try{
+  userPos=await getUserLocation();
+  document.getElementById('placeScope').textContent='по GPS';
+  return userPos;
+ }catch(_){
+  const c=map.getCenter();
+  const fallback={lat:c.lat,lng:c.lng,accuracy:null};
+  document.getElementById('placeScope').textContent='по центру карты';
+  return fallback;
+ }
+}
+async function nominatimPlaces(query, center, radiusKm=7){
+ const d=radiusKm/111;
+ const left=center.lng-d/Math.max(.35,Math.cos(center.lat*Math.PI/180)), right=center.lng+d/Math.max(.35,Math.cos(center.lat*Math.PI/180));
+ const top=Math.min(85,center.lat+d), bottom=Math.max(-85,center.lat-d);
+ const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=12&addressdetails=1&bounded=1&viewbox=${left},${top},${right},${bottom}&q=${encodeURIComponent(query)}`;
+ const r=await fetch(url,{headers:{Accept:'application/json'}});
+ if(!r.ok) throw new Error('search');
+ return r.json();
+}
+function placeName(item){return item.name||item.display_name?.split(',')[0]||'Место'}
+function mergePlaceItems(groups, center){
+ const mapById=new Map();
+ groups.flat().forEach(x=>{
+  const key=x.place_id||`${x.lat}:${x.lon}`;
+  if(!mapById.has(key)) mapById.set(key,x);
+ });
+ return [...mapById.values()].map(x=>({
+  ...x,
+  _distance:dist(center,{lat:+x.lat,lng:+x.lon})
+ })).sort((a,b)=>a._distance-b._distance).slice(0,15);
+}
+function showPlaceResults(items,intent){
+ results.style.display='block';
+ if(!items.length){
+  results.innerHTML=`<div class="result"><b>${intent?.emoji||'🔎'} Ничего подходящего не нашли</b><span>Попробуй другой район или категорию.</span></div>`;
+  return;
+ }
+ results.innerHTML=items.map((item,i)=>`
+  <div class="result place-result" data-place-result="${i}">
+   <span class="place-distance">${formatDistance(item._distance)}</span>
+   <b>${intent?.emoji||'📍'} ${escapeHtml(placeName(item))}</b>
+   <span>${escapeHtml(item.display_name||'Адрес не указан')}</span>
+  </div>`).join('');
+ results.querySelectorAll('[data-place-result]').forEach(el=>el.onclick=()=>{
+  const p=items[+el.dataset.placeResult];
+  selectDestination({lat:+p.lat,lng:+p.lon,name:placeName(p),full:p.display_name});
+  results.style.display='none';
+ });
+}
+async function searchPlaces(intentKey, customQuery=''){
+ const intent=PLACE_INTENTS[intentKey];
+ if(!intent && !customQuery.trim()) return;
+ document.querySelectorAll('[data-place]').forEach(b=>b.classList.toggle('active',b.dataset.place===intentKey));
+ const center=await ensurePlaceLocation();
+ const label=intent?.label||customQuery;
+ input.value='';
+ document.getElementById('placeInput').value=customQuery||intent.label;
+ results.style.display='block';
+ results.innerHTML=`<div class="result">🔎 Ищем ${escapeHtml(label.toLowerCase())} рядом…</div>`;
+ setStatus(`Ищем: ${label}`);
+ try{
+  const queries=intent?.queries||[customQuery];
+  const groups=await Promise.all(queries.map(q=>nominatimPlaces(q,center,7).catch(()=>[])));
+  const items=mergePlaceItems(groups,center);
+  showPlaceResults(items,intent);
+  showPlaceMarkers(items);
+  if(items.length){
+   const first=items[0];
+   map.flyTo({center:[+first.lon,+first.lat],zoom:14,pitch:52,duration:900});
+   setStatus(`${label}: найдено ${items.length}`);
+  }else setStatus('Подходящих мест не найдено');
+ }catch(e){
+  results.innerHTML='<div class="result"><b>Поиск мест недоступен</b><span>Проверь интернет и попробуй ещё раз.</span></div>';
+  setStatus('Ошибка поиска мест');
+ }
+}
+function parsePlaceQuery(q){
+ const t=q.toLowerCase();
+ if(/бильярд|pool hall|billiard/.test(t)) return 'billiards';
+ if(/день рождения|др|банкет|праздник|юбилей/.test(t)) return 'birthday';
+ if(/поесть|еда|ресторан|кафе|обед|ужин|завтрак|пицц/.test(t)) return 'food';
+ if(/кофе|coffee/.test(t)) return 'coffee';
+ if(/спорт|зал|фитнес|баскетбол|футбол|волейбол/.test(t)) return 'sport';
+ if(/развлеч|кино|боулинг|игров/.test(t)) return 'entertainment';
+ return null;
+}
+document.querySelectorAll('[data-place]').forEach(btn=>btn.addEventListener('click',()=>searchPlaces(btn.dataset.place)));
+document.getElementById('placeGo').onclick=()=>{
+ const q=document.getElementById('placeInput').value.trim();
+ if(!q) return;
+ const intent=parsePlaceQuery(q);
+ searchPlaces(intent,q);
+};
+document.getElementById('placeInput').addEventListener('keydown',e=>{
+ if(e.key==='Enter'){e.preventDefault();document.getElementById('placeGo').click();}
+});
+
+async function searchCategory(cat){
+ const c=map.getCenter(), d=map.getZoom()<5?12:2.5, left=c.lng-d,right=c.lng+d,top=Math.min(85,c.lat+d),bottom=Math.max(-85,c.lat-d);
+ results.style.display='block';results.innerHTML=`<div class="result">🔎 Ищем ${cat} рядом с видом карты…</div>`;
+ try{
+  const q=`${cat}`;const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=20&bounded=1&viewbox=${left},${top},${right},${bottom}&q=${encodeURIComponent(q)}`;
+  const r=await fetch(url,{headers:{Accept:'application/json'}});const items=await r.json();
+  showResults(items);showPlaceMarkers(items);setStatus(items.length?`Найдено: ${items.length}`:'Мест не найдено');
+ }catch(e){results.innerHTML='<div class="result"><b>Поиск недоступен</b><span>Проверь интернет.</span></div>'}
+}
+async function buildRoute(){
+ const seq=++routeSeq;if(!destination)return;
+ try{
+  if(!userPos)userPos=await getUserLocation();
+  setStatus('Строим маршрут…');
+  const coords=`${userPos.lng},${userPos.lat};${destination.lng},${destination.lat}`;
+  const url=`https://router.project-osrm.org/route/v1/${routeProfile}/${coords}?overview=full&geometries=geojson&steps=true&alternatives=true`;
+  const r=await fetch(url);const data=await r.json();if(seq!==routeSeq) return;if(data.code!=='Ok'||!data.routes?.length)throw new Error('Маршрут не найден');
+  const route=data.routes[0];clearRoute();
+  map.addSource('route',{type:'geojson',data:{type:'Feature',geometry:route.geometry}});
+  map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-join':'round','line-cap':'round'},paint:{'line-color':'#36d36f','line-width':['interpolate',['linear'],['zoom'],3,2,10,4,16,8,19,11],'line-opacity':.95}});
+  const b=new maplibregl.LngLatBounds();route.geometry.coordinates.forEach(c=>b.extend(c));
+  map.fitBounds(b,{padding:window.innerWidth<=620?{top:250,bottom:210,left:30,right:30}:{top:170,bottom:180,left:440,right:80},duration:1000,maxZoom:17});
+  metaEl.textContent=`${formatDistance(route.distance)} · ${formatTime(route.duration)}`;setStatus('Маршрут построен');
+ }catch(e){metaEl.textContent=e.message.includes('GPS')?'Разреши доступ к геолокации':'Не удалось построить маршрут';setStatus('Ошибка маршрута')}
+}
+async function locate(){
+ try{setStatus('Определяем GPS…');userPos=await getUserLocation();map.flyTo({center:[userPos.lng,userPos.lat],zoom:16,pitch:58,duration:1000});if(window.userMarker)window.userMarker.remove();window.userMarker=new maplibregl.Marker({color:'#36d36f'}).setLngLat([userPos.lng,userPos.lat]).addTo(map);setStatus(`GPS найден ±${Math.round(userPos.accuracy)} м`);if(destination)buildRoute()}catch(e){setStatus('Разреши GPS в браузере')}
+}
+function saveFavorite(){if(!destination)return;const f=JSON.parse(localStorage.getItem('aidux-favorites')||'[]');if(!f.some(x=>x.lat===destination.lat&&x.lng===destination.lng)){f.unshift(destination);localStorage.setItem('aidux-favorites',JSON.stringify(f.slice(0,30)));setStatus('Место добавлено в избранное ★')}else setStatus('Место уже в избранном')}
+function showFavorites(){const f=JSON.parse(localStorage.getItem('aidux-favorites')||'[]');results.style.display='block';results.innerHTML=f.length?f.map((x,i)=>`<div class="result" data-fav="${i}"><b>★ ${escapeHtml(x.name)}</b><span>${escapeHtml(x.full||x.name)}</span></div>`).join(''):'<div class="result"><b>Избранное пусто</b><span>Выбери место и добавь его в избранное.</span></div>';results.querySelectorAll('[data-fav]').forEach(el=>el.onclick=()=>{const x=f[+el.dataset.fav];selectDestination(x)})}
+function shareMap(){const c=map.getCenter();const url=`${location.origin}${location.pathname}#${c.lat.toFixed(5)},${c.lng.toFixed(5)},${map.getZoom().toFixed(2)}`;navigator.clipboard?.writeText(url).then(()=>setStatus('Ссылка на карту скопирована')).catch(()=>prompt('Скопируй ссылку:',url))}
+function readHash(){const a=location.hash.slice(1).split(',').map(Number);if(a.length===3&&a.every(Number.isFinite))map.jumpTo({center:[a[1],a[0]],zoom:a[2]})}
+
+map.on('load',()=>{
+ try{addTerrain()}catch(e){terrainOn=false;document.getElementById('terrainBtn').textContent='⛰️ 3D-рельеф: НЕТ'}
+ setProjection(true); readHash();
+ setStatus('3D-глобус готов • крути, приближай, наклоняй');
+});
+document.getElementById('go-btn').onclick=async()=>{const q=input.value.trim();if(!q)return;setStatus('Ищем…');try{showResults(await geocode(q));setStatus('Результаты поиска готовы')}catch(e){setStatus('Ошибка поиска');results.style.display='block';results.innerHTML='<div class="result"><b>Поиск временно недоступен</b></div>'}};
+input.addEventListener('keydown',e=>{if(e.key==='Enter')document.getElementById('go-btn').click()});
+document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>searchCategory(b.dataset.cat));
+document.getElementById('locateBtn').onclick=locate;document.getElementById('arBtn').onclick=()=>location.href='ar-nav.html';document.getElementById('shareBtn').onclick=shareMap;
+document.getElementById('driveBtn').onclick=()=>{routeProfile='driving';driveBtn.classList.add('active');walkBtn.classList.remove('active');buildRoute()};
+document.getElementById('walkBtn').onclick=()=>{routeProfile='walking';walkBtn.classList.add('active');driveBtn.classList.remove('active');buildRoute()};
+document.getElementById('globeBtn').onclick=()=>setProjection(!globeOn);
+document.getElementById('terrainBtn').onclick=()=>{terrainOn=!terrainOn;if(terrainOn)addTerrain();else removeTerrain();document.getElementById('terrainBtn').textContent=terrainOn?'⛰️ 3D-рельеф: ВКЛ':'⛰️ 3D-рельеф: ВЫКЛ'};
+document.getElementById('buildingsBtn').onclick=()=>buildingOn?removeBuildings():addBuildings();
+document.getElementById('favoritesBtn').onclick=showFavorites;
+document.getElementById('zoomIn').onclick=()=>map.zoomIn();document.getElementById('zoomOut').onclick=()=>map.zoomOut();
+document.getElementById('reset').onclick=()=>{map.flyTo({center:WORLD,zoom:1.35,pitch:18,bearing:0,duration:900});setProjection(true);setStatus('Вернулись к миру')};
+document.getElementById('pitch').onclick=()=>map.easeTo({pitch:map.getPitch()>35?12:62,duration:700});
+window.addEventListener('beforeunload',()=>{if(window.userMarker)window.userMarker.remove()});
+</script>
+<script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script>
+</body></html>

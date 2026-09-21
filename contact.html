@@ -1,0 +1,11 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AIDUX — Связь</title><link rel="stylesheet" href="style.css"><link rel="manifest" href="manifest.webmanifest"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="format-detection" content="telephone=no"></head><body>
+<header class="topbar">
+ <div class="shell topbar-inner">
+  <a class="brand" href="index.html"><span class="brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 4v7l-7 7-7-7V7l7-4Z" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 10l4 2 4-2" stroke="currentColor" stroke-width="2"/></svg></span>AIDUX</a>
+  <nav class="nav">
+   <a class="active" href="index.html">Главная</a><a href="map.html">Карта</a><a href="ar-nav.html">AR-навигация</a><a href="vr.html">VR</a><a class="nav-ai" href="ai-chat.html">✦ AIDUX AI</a><a href="about.html">О проекте</a>
+  </nav>
+  <button class="mobile-menu" onclick="document.querySelector('.nav').classList.toggle('open')">☰</button>
+ </div>
+</header>
+<main class="page"><div class="shell"><div class="page-title"><span class="eyebrow">Связь</span><h1>Расскажи, что <span class="gradient">улучшить.</span></h1><p>Форма демонстрационная: сообщение пока не отправляется на внешний сервер.</p></div><form class="form-card" id="form"><div class="field"><label>Имя</label><input required placeholder="Как к тебе обращаться?"></div><div class="field"><label>Сообщение</label><textarea required placeholder="Идея, ошибка или предложение..."></textarea></div><button class="btn primary big" type="submit">Отправить сообщение →</button><p id="msg" style="display:none;color:var(--green2);margin-top:14px">Спасибо! Сообщение принято в демо-режиме.</p></form></div></main><footer><div class="shell">AIDUX · Contact</div></footer><script>document.getElementById('form').addEventListener('submit',e=>{e.preventDefault();document.getElementById('msg').style.display='block';e.target.reset()})</script><script>if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));}</script></body></html>
