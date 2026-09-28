@@ -1,0 +1,10 @@
+{
+  "name": "AIDUX — умная карта и AR-навигация",
+  "short_name": "AIDUX",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#07110d",
+  "theme_color": "#07110d",
+  "lang": "ru",
+  "description": "Интерактивная карта, маршруты, AR, VR и AIDUX AI"
+}
