@@ -13,6 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
+app.set("trust proxy", 1); // за прокси хостинга берём настоящий IP посетителя, иначе лимиты будут общими на всех
 const PORT = process.env.PORT || 5500;
 // Раздаём только папку public: так .env и server.js не доступны по HTTP
 const ROOT = path.join(__dirname, "public");
@@ -131,14 +132,19 @@ function extractCitations(interaction) {
 // Errors where retrying with another model/tool makes no sense
 const FATAL_RE = /api key|api_key|permission|unauthori|forbidden|\b40[13]\b|quota|\b429\b|rate limit|resource exhausted|location is not supported/i;
 
-async function askGemini(ai, prompt, location) {
+// Maps-инструмент медленный: подключаем его только к вопросам про места, а при исчерпанной квоте отключаем на 10 минут
+const PLACE_RE = /рядом|поблизости|ближайш|где |куда |адрес|заведен|кафе|ресторан|поесть|позавтрак|пообедать|поужинать|кофе|аптек|магазин|бильярд|кино|парк|клуб|отел|гостиниц|день рождения|отпраздновать|как добраться|near|restaurant|cafe|pharmacy|hotel/i;
+let mapsPausedUntil = 0;
+
+async function askGemini(ai, prompt, location, query = "") {
   const mapsTool = validCoords(location)
     ? { type: "google_maps", latitude: Number(location.lat), longitude: Number(location.lng) }
     : { type: "google_maps" };
 
   // 1) Maps grounding  2) same model without Maps  3) stable fallback model without Maps
+  const placeQuestion = PLACE_RE.test(query);
   const attempts = [
-    { model: MODEL, maps: true },
+    ...(placeQuestion && Date.now() > mapsPausedUntil ? [{ model: MODEL, maps: true }] : []),
     { model: MODEL, maps: false },
     ...(MODEL !== FALLBACK_MODEL ? [{ model: FALLBACK_MODEL, maps: false }] : [])
   ];
@@ -146,7 +152,8 @@ async function askGemini(ai, prompt, location) {
   let lastError = new Error("empty answer");
   for (const a of attempts) {
     try {
-      const input = a.maps
+      const t0 = Date.now();
+      const input = (a.maps || !placeQuestion)
         ? prompt
         : `${prompt}\n\nВАЖНО: картографический источник сейчас недоступен. Не называй конкретные заведения, адреса, рейтинги и часы работы — честно скажи, что не можешь их проверить, и посоветуй воспользоваться поиском мест на карте AIDUX.`;
       const interaction = await ai.interactions.create({
@@ -155,6 +162,7 @@ async function askGemini(ai, prompt, location) {
         ...(a.maps ? { tools: [mapsTool] } : {})
       });
       const answer = interaction.output_text?.trim();
+      console.log(`Gemini ответил за ${Date.now() - t0} мс (model=${a.model}, maps=${a.maps})`);
       if (answer) return { answer, citations: a.maps ? extractCitations(interaction) : [] };
       lastError = new Error("empty answer");
     } catch (error) {
@@ -163,11 +171,27 @@ async function askGemini(ai, prompt, location) {
       const msg = String(error?.message || "");
       const isQuota = /quota|\b429\b|rate limit|resource exhausted/i.test(msg);
       // Ключ, доступ, регион: повторять бессмысленно. Квоту не считаем фатальной: у Maps-инструмента и у разных моделей лимиты отдельные
+      if (a.maps && isQuota) mapsPausedUntil = Date.now() + 10 * 60 * 1000;
       if (FATAL_RE.test(msg) && !isQuota) throw error;
     }
   }
   throw lastError;
 }
+
+// Защита ключа на публичном сайте: лимит на человека и общий лимит в сутки (AI_DAILY_LIMIT в настройках, по умолчанию 300)
+const askHits = new Map();
+setInterval(() => askHits.clear(), 5 * 60 * 1000).unref();
+let askDay = { day: "", count: 0 };
+const ASK_DAILY_LIMIT = Number(process.env.AI_DAILY_LIMIT) || 300;
+app.use("/ask", (req, res, next) => {
+  const now = Date.now(), day = new Date().toISOString().slice(0, 10);
+  if (askDay.day !== day) askDay = { day, count: 0 };
+  const list = (askHits.get(req.ip) || []).filter(t => now - t < 60000);
+  if (list.length >= 10) return res.status(429).json({ answer: "Слишком много вопросов подряд. Подожди минуту." });
+  if (askDay.count >= ASK_DAILY_LIMIT) return res.status(429).json({ answer: "На сегодня лимит AI-вопросов исчерпан. Попробуй завтра." });
+  list.push(now); askHits.set(req.ip, list); askDay.count++;
+  next();
+});
 
 app.post("/ask", async (req, res) => {
   const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
@@ -189,7 +213,7 @@ app.post("/ask", async (req, res) => {
       : "Текущая геопозиция пользователя недоступна.";
 
     const prompt = `${SITE_CONTEXT}\n\n${locationText}\n\nИСТОРИЯ ДИАЛОГА:\n${history || "нет"}\n\nНОВЫЙ ВОПРОС ПОЛЬЗОВАТЕЛЯ:\n${query}`;
-    const result = await askGemini(ai, prompt, location);
+    const result = await askGemini(ai, prompt, location, query);
     res.json(result);
   } catch (error) {
     console.error("Gemini API error:", error?.message || error);
