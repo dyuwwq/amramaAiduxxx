@@ -136,7 +136,17 @@ const FATAL_RE = /api key|api_key|permission|unauthori|forbidden|\b40[13]\b|quot
 const PLACE_RE = /рядом|поблизости|ближайш|где |куда |адрес|заведен|кафе|ресторан|поесть|позавтрак|пообедать|поужинать|кофе|аптек|магазин|бильярд|кино|парк|клуб|отел|гостиниц|день рождения|отпраздновать|как добраться|near|restaurant|cafe|pharmacy|hotel/i;
 let mapsPausedUntil = 0;
 
+// Без таймаута зависший запрос к Gemini мог висеть минутами. Ограничиваем каждую попытку и общее время.
+const ATTEMPT_TIMEOUT_MS = 20000;
+const TOTAL_BUDGET_MS = 40000;
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timeout: Gemini не ответил за " + Math.round(ms / 1000) + " с")), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function askGemini(ai, prompt, location, query = "") {
+  const startedAt = Date.now();
   const mapsTool = validCoords(location)
     ? { type: "google_maps", latitude: Number(location.lat), longitude: Number(location.lng) }
     : { type: "google_maps" };
@@ -151,16 +161,17 @@ async function askGemini(ai, prompt, location, query = "") {
 
   let lastError = new Error("empty answer");
   for (const a of attempts) {
+    if (Date.now() - startedAt > TOTAL_BUDGET_MS) break;
     try {
       const t0 = Date.now();
       const input = (a.maps || !placeQuestion)
         ? prompt
         : `${prompt}\n\nВАЖНО: картографический источник сейчас недоступен. Не называй конкретные заведения, адреса, рейтинги и часы работы — честно скажи, что не можешь их проверить, и посоветуй воспользоваться поиском мест на карте AIDUX.`;
-      const interaction = await ai.interactions.create({
+      const interaction = await withTimeout(ai.interactions.create({
         model: a.model,
         input,
         ...(a.maps ? { tools: [mapsTool] } : {})
-      });
+      }), ATTEMPT_TIMEOUT_MS);
       const answer = interaction.output_text?.trim();
       console.log(`Gemini ответил за ${Date.now() - t0} мс (model=${a.model}, maps=${a.maps})`);
       if (answer) return { answer, citations: a.maps ? extractCitations(interaction) : [] };
@@ -171,7 +182,7 @@ async function askGemini(ai, prompt, location, query = "") {
       const msg = String(error?.message || "");
       const isQuota = /quota|\b429\b|rate limit|resource exhausted/i.test(msg);
       // Ключ, доступ, регион: повторять бессмысленно. Квоту не считаем фатальной: у Maps-инструмента и у разных моделей лимиты отдельные
-      if (a.maps && isQuota) mapsPausedUntil = Date.now() + 10 * 60 * 1000;
+      if (a.maps && (isQuota || /^timeout/.test(msg))) mapsPausedUntil = Date.now() + 10 * 60 * 1000;
       if (FATAL_RE.test(msg) && !isQuota) throw error;
     }
   }
@@ -223,6 +234,9 @@ app.post("/ask", async (req, res) => {
     }
     if (/api key|api_key|unauthori|\b401\b/i.test(msg)) {
       return res.status(502).json({ answer: "Gemini не принял API-ключ. Проверь GEMINI_API_KEY в файле .env и перезапусти сервер." });
+    }
+    if (/timeout/i.test(msg)) {
+      return res.status(504).json({ answer: "Нейросеть не успела ответить. Попробуй ещё раз или задай вопрос короче." });
     }
     if (/location is not supported/i.test(msg)) {
       return res.status(502).json({ answer: "Gemini API недоступен из твоего региона." });
