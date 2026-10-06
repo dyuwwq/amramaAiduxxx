@@ -112,7 +112,7 @@ app.get("/health", (_req, res) => {
 });
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
-const FALLBACK_MODEL = "gemini-2.5-flash";
+const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash"; // запасная модель, если основная недоступна
 
 function extractCitations(interaction) {
   const citations = [];
