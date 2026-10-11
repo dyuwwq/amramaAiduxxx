@@ -1,6 +1,6 @@
 // Network-first: сначала свежие файлы из сети, кэш — только если нет интернета.
 // При каждом обновлении сайта увеличивай номер версии (v5 -> v6 и т.д.).
-const CACHE = 'aidux-v5';
+const CACHE = 'aidux-v6';
 const ASSETS = ['./', './index.html', './map.html', './map.js', './places.css', './ar-nav.html', './vr.html',
   './ai-chat.html', './about.html', './contact.html', './style.css', './ai-chat.css', './ai-chat.js', './manifest.webmanifest'];
 

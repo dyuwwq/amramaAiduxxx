@@ -108,11 +108,12 @@ function validCoords(location) {
 }
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "AIDUX AI", provider: "Gemini" });
+  const k = (process.env.GEMINI_API_KEY || "").trim();
+  res.json({ ok: true, service: "AIDUX AI", provider: "Gemini", ai: Boolean(k) && k !== "YOUR_API_KEY" });
 });
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
-const FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.8-flash"; // запасная модель, если основная недоступна
+const FALLBACK_MODEL = "gemini-2.5-flash";
 
 function extractCitations(interaction) {
   const citations = [];
@@ -136,17 +137,7 @@ const FATAL_RE = /api key|api_key|permission|unauthori|forbidden|\b40[13]\b|quot
 const PLACE_RE = /рядом|поблизости|ближайш|где |куда |адрес|заведен|кафе|ресторан|поесть|позавтрак|пообедать|поужинать|кофе|аптек|магазин|бильярд|кино|парк|клуб|отел|гостиниц|день рождения|отпраздновать|как добраться|near|restaurant|cafe|pharmacy|hotel/i;
 let mapsPausedUntil = 0;
 
-// Без таймаута зависший запрос к Gemini мог висеть минутами. Ограничиваем каждую попытку и общее время.
-const ATTEMPT_TIMEOUT_MS = 20000;
-const TOTAL_BUDGET_MS = 40000;
-function withTimeout(promise, ms) {
-  let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timeout: Gemini не ответил за " + Math.round(ms / 1000) + " с")), ms); });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
-
 async function askGemini(ai, prompt, location, query = "") {
-  const startedAt = Date.now();
   const mapsTool = validCoords(location)
     ? { type: "google_maps", latitude: Number(location.lat), longitude: Number(location.lng) }
     : { type: "google_maps" };
@@ -161,17 +152,16 @@ async function askGemini(ai, prompt, location, query = "") {
 
   let lastError = new Error("empty answer");
   for (const a of attempts) {
-    if (Date.now() - startedAt > TOTAL_BUDGET_MS) break;
     try {
       const t0 = Date.now();
       const input = (a.maps || !placeQuestion)
         ? prompt
         : `${prompt}\n\nВАЖНО: картографический источник сейчас недоступен. Не называй конкретные заведения, адреса, рейтинги и часы работы — честно скажи, что не можешь их проверить, и посоветуй воспользоваться поиском мест на карте AIDUX.`;
-      const interaction = await withTimeout(ai.interactions.create({
+      const interaction = await ai.interactions.create({
         model: a.model,
         input,
         ...(a.maps ? { tools: [mapsTool] } : {})
-      }), ATTEMPT_TIMEOUT_MS);
+      });
       const answer = interaction.output_text?.trim();
       console.log(`Gemini ответил за ${Date.now() - t0} мс (model=${a.model}, maps=${a.maps})`);
       if (answer) return { answer, citations: a.maps ? extractCitations(interaction) : [] };
@@ -182,7 +172,7 @@ async function askGemini(ai, prompt, location, query = "") {
       const msg = String(error?.message || "");
       const isQuota = /quota|\b429\b|rate limit|resource exhausted/i.test(msg);
       // Ключ, доступ, регион: повторять бессмысленно. Квоту не считаем фатальной: у Maps-инструмента и у разных моделей лимиты отдельные
-      if (a.maps && (isQuota || /^timeout/.test(msg))) mapsPausedUntil = Date.now() + 10 * 60 * 1000;
+      if (a.maps && isQuota) mapsPausedUntil = Date.now() + 10 * 60 * 1000;
       if (FATAL_RE.test(msg) && !isQuota) throw error;
     }
   }
@@ -208,6 +198,9 @@ app.post("/ask", async (req, res) => {
   const query = typeof req.body?.query === "string" ? req.body.query.trim() : "";
   const history = cleanHistory(req.body?.history);
   const location = req.body?.location;
+  const LANG_NAMES = { ru: "русский", en: "английский", kk: "казахский" };
+  const lang = LANG_NAMES[req.body?.lang] ? req.body.lang : "";
+  const langText = lang ? `Язык интерфейса пользователя: ${LANG_NAMES[lang]}. Отвечай на языке вопроса, а если он неясен, на этом языке. Отвечай коротко и простыми предложениями, без таблиц, списков, markdown и эмодзи: ответ будет озвучен.` : "";
 
   if (!query) return res.status(400).json({ answer: "Напиши вопрос 🙂" });
 
@@ -223,7 +216,7 @@ app.post("/ask", async (req, res) => {
       ? `Текущая геопозиция пользователя: ${Number(location.lat).toFixed(6)}, ${Number(location.lng).toFixed(6)}.`
       : "Текущая геопозиция пользователя недоступна.";
 
-    const prompt = `${SITE_CONTEXT}\n\n${locationText}\n\nИСТОРИЯ ДИАЛОГА:\n${history || "нет"}\n\nНОВЫЙ ВОПРОС ПОЛЬЗОВАТЕЛЯ:\n${query}`;
+    const prompt = `${SITE_CONTEXT}\n\n${locationText}\n\nИСТОРИЯ ДИАЛОГА:\n${history || "нет"}\n\n${langText}\n\nНОВЫЙ ВОПРОС ПОЛЬЗОВАТЕЛЯ:\n${query}`;
     const result = await askGemini(ai, prompt, location, query);
     res.json(result);
   } catch (error) {
@@ -234,9 +227,6 @@ app.post("/ask", async (req, res) => {
     }
     if (/api key|api_key|unauthori|\b401\b/i.test(msg)) {
       return res.status(502).json({ answer: "Gemini не принял API-ключ. Проверь GEMINI_API_KEY в файле .env и перезапусти сервер." });
-    }
-    if (/timeout/i.test(msg)) {
-      return res.status(504).json({ answer: "Нейросеть не успела ответить. Попробуй ещё раз или задай вопрос короче." });
     }
     if (/location is not supported/i.test(msg)) {
       return res.status(502).json({ answer: "Gemini API недоступен из твоего региона." });
@@ -487,6 +477,25 @@ app.get("/api/search", async (req, res) => {
   } catch (e) {
     console.error("search error:", e?.message || e);
     res.status(502).json({ error: "search unavailable" });
+  }
+});
+
+// «Где я»: адрес по координатам (для голосового ответа)
+app.get("/api/reverse", async (req, res) => {
+  const lat = Number(req.query.lat), lng = Number(req.query.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return res.status(400).json({ error: "lat/lng" });
+  try {
+    const address = await memoize(`r:${lat.toFixed(4)}:${lng.toFixed(4)}`, 10 * 60 * 1000, async () => {
+      const r = await fetch(`https://photon.komoot.io/reverse?lon=${lng}&lat=${lat}&limit=1`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) throw new Error("photon " + r.status);
+      const p = (await r.json()).features?.[0]?.properties || {};
+      const street = [p.street, p.housenumber].filter(Boolean).join(" ");
+      return [p.name !== street ? p.name : "", street, p.district, p.city || p.town || p.village].filter(Boolean).join(", ");
+    });
+    res.json({ address });
+  } catch (e) {
+    console.error("reverse error:", e?.message || e);
+    res.status(502).json({ error: "reverse unavailable" });
   }
 });
 
