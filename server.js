@@ -144,9 +144,10 @@ async function askGemini(ai, prompt, location, query = "") {
 
   // 1) Maps grounding  2) same model without Maps  3) stable fallback model without Maps
   const placeQuestion = PLACE_RE.test(query);
-  const attempts = [
+    const attempts = [
     ...(placeQuestion && Date.now() > mapsPausedUntil ? [{ model: MODEL, maps: true }] : []),
     { model: MODEL, maps: false },
+    { model: MODEL, maps: false, plain: true },
     ...(MODEL !== FALLBACK_MODEL ? [{ model: FALLBACK_MODEL, maps: false }] : [])
   ];
 
@@ -157,11 +158,11 @@ async function askGemini(ai, prompt, location, query = "") {
       const input = (a.maps || !placeQuestion)
         ? prompt
         : `${prompt}\n\nВАЖНО: картографический источник сейчас недоступен. Не называй конкретные заведения, адреса, рейтинги и часы работы — честно скажи, что не можешь их проверить, и посоветуй воспользоваться поиском мест на карте AIDUX.`;
-      const interaction = await ai.interactions.create({
+      const interaction = await withTimeout(ai.interactions.create({
         model: a.model,
-        input,
+        input: a.plain ? input + "\n\nОтветь обычным текстом, без JSON и без разметки." : input,
         ...(a.maps ? { tools: [mapsTool] } : {})
-      });
+      }), ATTEMPT_TIMEOUT_MS);
       const answer = interaction.output_text?.trim();
       console.log(`Gemini ответил за ${Date.now() - t0} мс (model=${a.model}, maps=${a.maps})`);
       if (answer) return { answer, citations: a.maps ? extractCitations(interaction) : [] };
