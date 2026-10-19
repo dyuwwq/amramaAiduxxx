@@ -134,9 +134,15 @@ function extractCitations(interaction) {
 const FATAL_RE = /api key|api_key|permission|unauthori|forbidden|\b40[13]\b|quota|\b429\b|rate limit|resource exhausted|location is not supported/i;
 
 // Maps-инструмент медленный: подключаем его только к вопросам про места, а при исчерпанной квоте отключаем на 10 минут
-const PLACE_RE = /рядом|поблизости|ближайш|где |куда |адрес|заведен|кафе|ресторан|поесть|позавтрак|пообедать|поужинать|кофе|аптек|магазин|бильярд|кино|парк|клуб|отел|гостиниц|день рождения|отпраздновать|как добраться|near|restaurant|cafe|pharmacy|hotel/i;
+const PLACE_RE = /рядом|поблизости|ближайш|... (твоя строка, не трогай)/i;
 let mapsPausedUntil = 0;
-
+const ATTEMPT_TIMEOUT_MS = 20000;
+const TOTAL_BUDGET_MS = 40000;
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("timeout: Gemini не ответил за " + Math.round(ms / 1000) + " с")), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 async function askGemini(ai, prompt, location, query = "") {
   const mapsTool = validCoords(location)
     ? { type: "google_maps", latitude: Number(location.lat), longitude: Number(location.lng) }
