@@ -27,7 +27,7 @@ const validPos = p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng) && M
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* хранилище недоступно */ } };
 async function api(path, params) {
-  const r = await fetch(path + '?' + new URLSearchParams(params));
+  const r = await fetch(path + '?' + new URLSearchParams(params), { signal: AbortSignal.timeout(14000) });
   if (!r.ok) throw new Error('api ' + r.status);
   return r.json();
 }
@@ -214,6 +214,7 @@ function showPlaceMarkers(list) {
 function showCard(p) {
   let el = $('placeCard');
   if (!el) { el = document.createElement('div'); el.id = 'placeCard'; document.querySelector('.bottom-card').prepend(el); }
+  $('bottomCard').classList.add('on');
   const st = p.id ? hoursStatus(p.hours) : null;
   const phone = String(p.phone || '').split(';')[0].replace(/[^\d+]/g, '');
   const w = String(p.website || '').trim();
@@ -234,7 +235,8 @@ function showCard(p) {
     <button id="pcFav">★</button><button id="pcShare">↗</button>
    </div>`;
   el.style.display = 'block';
-  el.querySelector('.pc-close').onclick = () => { el.style.display = 'none'; };
+  el.style.display = '';
+  el.querySelector('.pc-close').onclick = () => { el.style.display = 'none'; $('bottomCard').classList.remove('on'); };
   $('pcRoute').onclick = () => buildRoute();
   $('pcFav').onclick = saveFavorite;
   $('pcShare').onclick = () => {
@@ -244,6 +246,7 @@ function showCard(p) {
 }
 function selectDestination(d) {
   destination = { lat: +d.lat, lng: +d.lng, name: d.name, full: d.full || d.name, place: d.place || null };
+  $('bottomCard').classList.add('on');
   $('destName').textContent = destination.name;
   $('routeMeta').textContent = userPos ? 'Нажми «Маршрут»' : 'Чтобы построить маршрут, отметь где ты (кнопка «Моё местоположение»)';
   results.style.display = 'none';
@@ -405,7 +408,7 @@ async function buildRoute() {
     map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#36d36f', 'line-width': ['interpolate', ['linear'], ['zoom'], 3, 2, 16, 7], 'line-opacity': .95 } });
     const b = new maplibregl.LngLatBounds();
     route.geometry.coordinates.forEach(c => b.extend(c));
-    map.fitBounds(b, { padding: window.innerWidth <= 620 ? { top: 250, bottom: 210, left: 30, right: 30 } : { top: 170, bottom: 180, left: 440, right: 80 }, duration: 900, maxZoom: 17 });
+    map.fitBounds(b, { padding: window.innerWidth <= 900 ? { top: 250, bottom: 210, left: 30, right: 30 } : { top: 170, bottom: 180, left: 440, right: 80 }, duration: 900, maxZoom: 17 });
     $('routeMeta').textContent = `${formatDistance(route.distance)} · ${formatTime(route.duration)}`;
     setStatus('Маршрут построен');
   } catch (_) {

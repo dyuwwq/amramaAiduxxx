@@ -324,20 +324,18 @@ const KIND = {
 
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 async function overpass(query) {
-  let lastErr;
-  for (const url of OVERPASS) {
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
-        body: "data=" + encodeURIComponent(query),
-        signal: AbortSignal.timeout(25000)
-      });
-      if (!r.ok) throw new Error("overpass " + r.status);
-      return await r.json();
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
+  // Оба зеркала параллельно, берём первый успешный ответ (раньше шли по очереди до 25 с каждое)
+  const one = async url => {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
+      body: "data=" + encodeURIComponent(query),
+      signal: AbortSignal.timeout(9000)
+    });
+    if (!r.ok) throw new Error("overpass " + r.status);
+    return r.json();
+  };
+  return Promise.any(OVERPASS.map(one)).catch(e => { throw e.errors?.[0] || e; });
 }
 
 function haversine(aLat, aLng, bLat, bLng) {
@@ -384,7 +382,7 @@ app.get("/api/places", async (req, res) => {
     const places = await memoize(`p:${key}:${lat.toFixed(3)}:${lng.toFixed(3)}:${r}`, 10 * 60 * 1000, async () => {
       const nm = cat.noName ? "" : '["name"]';
       const body = cat.f.map(f => `nwr(around:${r},${lat},${lng})${f}${nm};`).join("");
-      const data = await overpass(`[out:json][timeout:20];(${body});out center tags 80;`);
+      const data = await overpass(`[out:json][timeout:9];(${body});out center tags 80;`);
       return (data.elements || []).map(el => normalizePlace(el, cat)).filter(Boolean);
     });
     const out = places
@@ -445,7 +443,7 @@ async function addressSearch(addr, lat, lng) {
   const st = addr.street.map(fuzzyWord).join(".*");
   const gap = /\d/.test(addr.sub) ? "{1,9}" : "{0,9}"; // между номером и цифровым корпусом разделитель обязателен (иначе 55/1 совпадёт с 551)
   const hn = addr.sub ? `^${addr.num}[^0-9]${gap}${fuzzyWord(addr.sub)}$` : `^${addr.num}([^0-9].*)?$`;
-  const data = await overpass(`[out:json][timeout:25];(${aroundAll(`["addr:street"~"${st}"]["addr:housenumber"~"${hn}"]`)}${ZONES.map(z => `way(around:${z.ovKm * 1000},${z.lat},${z.lng})["highway"]["name"~"${st}"];`).join("")});out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:9];(${aroundAll(`["addr:street"~"${st}"]["addr:housenumber"~"${hn}"]`)}${ZONES.map(z => `way(around:${z.ovKm * 1000},${z.lat},${z.lng})["highway"]["name"~"${st}"];`).join("")});out center tags 150;`);
   const els = (data.elements || []).filter(e => coordsOf(e).lat != null);
   const houses = els.filter(e => e.tags?.["addr:housenumber"]).map(e => {
     const t = e.tags, c = coordsOf(e);
@@ -467,7 +465,7 @@ async function nameSearch(q, lat, lng) {
   const toks = words(q).slice(0, 4);
   if (!toks.length) return [];
   const res = toks.map(t => [t, ...(SYN[t] || [])].map(fuzzyWord).join("|"));
-  const data = await overpass(`[out:json][timeout:25];(${res.map(re => aroundAll(`["name"~"${re}"]`)).join("")});out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:9];(${res.map(re => aroundAll(`["name"~"${re}"]`)).join("")});out center tags 150;`);
   const tests = res.map(re => new RegExp(re));
   return (data.elements || []).filter(e => coordsOf(e).lat != null).map(e => {
     const t = e.tags || {}, c = coordsOf(e);
@@ -538,7 +536,8 @@ app.get("/api/search", async (req, res) => {
   if (q.length < 2) return res.json([]);
   try {
     const items = await memoize(`f:${q.toLowerCase()}:${lat.toFixed(2)}:${lng.toFixed(2)}:${wide}`, 30 * 60 * 1000, async () => {
-      const [loc, ph] = await Promise.allSettled([wide ? [] : localSearch(q, lat, lng), photon(q, lat, lng, wide, 8)]);
+      const withDeadline = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("deadline")), ms))]);
+      const [loc, ph] = await Promise.allSettled([wide ? [] : withDeadline(localSearch(q, lat, lng), 7000), photon(q, lat, lng, wide, 8)]);
       if (loc.status === "rejected" && ph.status === "rejected") throw ph.reason;
       const seen = new Set(), out = [];
       for (const it of [...(loc.value || []), ...(ph.value || [])]) {
