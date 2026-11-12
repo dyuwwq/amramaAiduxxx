@@ -3,6 +3,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const KOST = { lat: 53.2144, lng: 63.6246 };
+// Зоны поиска (должны совпадать с ZONES в server.js): Костанай ~40 км, Карабалык 20 км
+const ZONES = [{ ...KOST, km: 40 }, { lat: 53.7589, lng: 61.0997, km: 20 }];
+const zoneBox = z => { const dLat = z.km / 111.3, dLng = dLat / Math.max(.3, Math.cos(z.lat * Math.PI / 180)); return `${z.lng - dLng},${z.lat + dLat},${z.lng + dLng},${z.lat - dLat}`; };
 const results = $('results'), actions = $('routeActions');
 
 let userPos = null, destination = null, profile = 'car', routeSeq = 0;
@@ -257,15 +260,20 @@ function pick(p) { selectDestination({ lat: p.lat, lng: p.lng, name: p.name, ful
 
 // ---------- Поиск по адресу и названию ----------
 async function nominatimLocal(q, wide) { // запасной вариант, если наш сервер недоступен
-  const c = viewCenter(), vb = wide ? '' : `&bounded=1&viewbox=${c.lng - .7},${c.lat + .4},${c.lng + .7},${c.lat - .4}`;
-  const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8${vb}&q=${encodeURIComponent(q)}`);
-  if (!r.ok) throw new Error('nominatim');
-  return r.json();
+  const get = async vb => {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8${vb}&q=${encodeURIComponent(q)}`);
+    if (!r.ok) throw new Error('nominatim');
+    return r.json();
+  };
+  if (wide) return get('');
+  const parts = await Promise.allSettled(ZONES.map(z => get(`&bounded=1&viewbox=${zoneBox(z)}`)));
+  if (parts.every(p => p.status === 'rejected')) throw new Error('nominatim');
+  return parts.flatMap(p => p.value || []).slice(0, 10);
 }
 function showResults(items) {
   results.style.display = 'block';
   if (!items.length) {
-    results.innerHTML = '<div class="result"><b>Рядом ничего не найдено</b><span>Искал в радиусе около 40 км. Попробуй написать иначе.</span></div><div class="result" id="wideBtn"><b>🌍 Искать по всему миру</b></div>';
+    results.innerHTML = '<div class="result"><b>Рядом ничего не найдено</b><span>Искал в Костанае (около 40 км) и в Карабалыке (20 км). Попробуй написать иначе.</span></div><div class="result" id="wideBtn"><b>🌍 Искать по всему миру</b></div>';
     $('wideBtn').onclick = () => searchAddress(lastQ, true);
     return;
   }

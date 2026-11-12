@@ -153,7 +153,11 @@ async function searchAddress(q){
   const c=user||{lat:53.2144,lng:63.6246};
   let items;
   try{const r=await fetch('/api/search?'+new URLSearchParams({q,lat:c.lat.toFixed(4),lng:c.lng.toFixed(4)}));if(!r.ok)throw new Error('api');items=await r.json()}
-  catch(_){const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&bounded=1&viewbox='+[c.lng-.7,c.lat+.4,c.lng+.7,c.lat-.4].join(',')+'&q='+encodeURIComponent(q));items=await r.json()}
+  catch(_){
+   const zs=[{lat:53.2144,lng:63.6246,km:40},{lat:53.7589,lng:61.0997,km:20}];
+   const parts=await Promise.allSettled(zs.map(async z=>{const dLat=z.km/111.3,dLng=dLat/Math.max(.3,Math.cos(z.lat*Math.PI/180));
+    const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&bounded=1&viewbox='+[z.lng-dLng,z.lat+dLat,z.lng+dLng,z.lat-dLat].join(',')+'&q='+encodeURIComponent(q));return r.json()}));
+   items=parts.flatMap(p=>p.value||[]).slice(0,8)}
   results.innerHTML='';
   if(!items.length){results.innerHTML='<div class="result"><b>Рядом ничего не найдено</b><span>Попробуй написать иначе.</span></div>';return}
   items.forEach(x=>{

@@ -401,6 +401,25 @@ app.get("/api/places", async (req, res) => {
 // ----- Локальный поиск: адреса и названия рядом с центром поиска (по умолчанию Костанай) -----
 const KOSTANAY = { lat: 53.2144, lng: 63.6246 };
 
+// Зоны поиска: Костанай (рамка ~40 км) и посёлок Карабалык (20 км). ovKm: радиус для Overpass (он тяжелее Photon).
+const ZONES = [
+  { name: "Костанай", lat: 53.2144, lng: 63.6246, km: 40, ovKm: 25 },
+  { name: "Карабалык", lat: 53.7589, lng: 61.0997, km: 20, ovKm: 20 }
+];
+const zonesNear = (lat, lng) => [...ZONES].sort((a, b) => haversine(lat, lng, a.lat, a.lng) / a.km - haversine(lat, lng, b.lat, b.lng) / b.km);
+const zoneOf = (lat, lng) => ZONES.indexOf(zonesNear(lat, lng)[0]);
+// Overpass: один и тот же селектор по всем зонам
+const aroundAll = sel => ZONES.map(z => `nwr(around:${z.ovKm * 1000},${z.lat},${z.lng})${sel};`).join("");
+// Результаты из разных зон чередуем (сначала ближайшая к центру карты), чтобы Карабалык не вытеснялся Костанаем
+function mixZones(items, lat, lng, limit) {
+  const groups = ZONES.map(() => []);
+  for (const it of items) groups[zoneOf(it.lat, it.lon)].push(it);
+  const lists = zonesNear(lat, lng).map(z => groups[ZONES.indexOf(z)]), out = [];
+  for (let k = 0; out.length < limit && lists.some(l => k < l.length); k++)
+    for (const l of lists) if (k < l.length && out.length < limit) out.push(l[k]);
+  return out;
+}
+
 // <local>
 // Человек пишет «Тауелсиздик», а в OSM «Тәуелсіздік»: каждая буква превращается в класс похожих (обоих регистров).
 const FUZZ = { а: "аә", ә: "аә", и: "иі", і: "иі", ы: "ыі", у: "уүұ", ү: "уүұ", ұ: "уүұ", к: "кқ", қ: "кқ", н: "нң", ң: "нң", г: "гғ", ғ: "гғ", х: "хһ", һ: "хһ", о: "оө", ө: "оө", е: "еэ", э: "еэ" };
@@ -408,7 +427,7 @@ const fuzzyWord = w => [...w.toLowerCase()].filter(ch => /[\p{L}\p{N}]/u.test(ch
   const set = [...(FUZZ[ch] || ch)];
   return "[" + [...new Set([...set, ...set.map(c => c.toUpperCase())])].join("") + "]";
 }).join("");
-const STOP = new Set(["ул", "улица", "пр", "просп", "проспект", "мкр", "микрорайон", "көшесі", "көш", "даңғылы", "дом", "город", "костанай", "қостанай", "kostanay"]);
+const STOP = new Set(["ул", "улица", "пр", "просп", "проспект", "мкр", "микрорайон", "көшесі", "көш", "даңғылы", "дом", "город", "костанай", "қостанай", "kostanay", "карабалык", "қарабалық", "karabalyk", "поселок", "посёлок", "пос"]);
 const SYN = { плаза: ["plaza"], цум: ["tsum"], март: ["mart"], трц: ["mall", "трк", "тц"], трк: ["трц", "mall"], тц: ["трц", "mall"], молл: ["mall"], аптека: ["pharmacy"], кафе: ["cafe"] };
 const words = q => q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length > 1 && !STOP.has(w));
 // «Тауелсиздик 55 / 1», «ул. Абая д 5», «Байконур 12а»
@@ -422,11 +441,11 @@ function parseAddress(q) {
 
 const coordsOf = el => ({ lat: el.lat ?? el.center?.lat, lng: el.lon ?? el.center?.lon });
 
-async function addressSearch(addr, lat, lng, R) {
+async function addressSearch(addr, lat, lng) {
   const st = addr.street.map(fuzzyWord).join(".*");
   const gap = /\d/.test(addr.sub) ? "{1,9}" : "{0,9}"; // между номером и цифровым корпусом разделитель обязателен (иначе 55/1 совпадёт с 551)
   const hn = addr.sub ? `^${addr.num}[^0-9]${gap}${fuzzyWord(addr.sub)}$` : `^${addr.num}([^0-9].*)?$`;
-  const data = await overpass(`[out:json][timeout:25];(nwr(around:${R},${lat},${lng})["addr:street"~"${st}"]["addr:housenumber"~"${hn}"];way(around:${R},${lat},${lng})["highway"]["name"~"${st}"];);out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:25];(${aroundAll(`["addr:street"~"${st}"]["addr:housenumber"~"${hn}"]`)}${ZONES.map(z => `way(around:${z.ovKm * 1000},${z.lat},${z.lng})["highway"]["name"~"${st}"];`).join("")});out center tags 150;`);
   const els = (data.elements || []).filter(e => coordsOf(e).lat != null);
   const houses = els.filter(e => e.tags?.["addr:housenumber"]).map(e => {
     const t = e.tags, c = coordsOf(e);
@@ -434,21 +453,21 @@ async function addressSearch(addr, lat, lng, R) {
     return { lat: c.lat, lon: c.lng, name: title + (t.name ? " · " + t.name : ""), display_name: [title, t.name, t["addr:city"]].filter(Boolean).join(", "),
       _rank: (t["addr:housenumber"] === addr.num + (addr.sub ? "/" + addr.sub : "") ? 0 : 1) * 1e9 + haversine(lat, lng, c.lat, c.lng) };
   });
-  if (houses.length) return houses.sort((a, b) => a._rank - b._rank).slice(0, 6);
+  if (houses.length) return mixZones(houses.sort((a, b) => a._rank - b._rank), lat, lng, 6);
   // Дом в OSM не нашли: показываем саму улицу (ближайший к центру поиска участок)
   const streets = new Map();
   for (const e of els.filter(e => e.tags?.highway && e.tags?.name)) {
     const c = coordsOf(e), d = haversine(lat, lng, c.lat, c.lng);
     if (!streets.has(e.tags.name) || streets.get(e.tags.name).d > d) streets.set(e.tags.name, { d, lat: c.lat, lon: c.lng, name: e.tags.name, display_name: e.tags.name + " (дом " + addr.num + (addr.sub ? "/" + addr.sub : "") + " не найден в OSM, показана улица)" });
   }
-  return [...streets.values()].sort((a, b) => a.d - b.d).slice(0, 3);
+  return mixZones([...streets.values()].sort((a, b) => a.d - b.d), lat, lng, 4);
 }
 
-async function nameSearch(q, lat, lng, R) {
+async function nameSearch(q, lat, lng) {
   const toks = words(q).slice(0, 4);
   if (!toks.length) return [];
   const res = toks.map(t => [t, ...(SYN[t] || [])].map(fuzzyWord).join("|"));
-  const data = await overpass(`[out:json][timeout:25];(${res.map(re => `nwr(around:${R},${lat},${lng})["name"~"${re}"];`).join("")});out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:25];(${res.map(re => aroundAll(`["name"~"${re}"]`)).join("")});out center tags 150;`);
   const tests = res.map(re => new RegExp(re));
   return (data.elements || []).filter(e => coordsOf(e).lat != null).map(e => {
     const t = e.tags || {}, c = coordsOf(e);
@@ -456,19 +475,20 @@ async function nameSearch(q, lat, lng, R) {
     const street = [t["addr:street"], t["addr:housenumber"]].filter(Boolean).join(" ");
     return { lat: c.lat, lon: c.lng, name: t["name:ru"] || t.name, display_name: [t["name:ru"] || t.name, street, t["addr:city"]].filter(Boolean).join(", "),
       _score: tests.filter(r => r.test(names)).length, _d: haversine(lat, lng, c.lat, c.lng) };
-  }).filter(x => x._score > 0).sort((a, b) => b._score - a._score || a._d - b._d).slice(0, 8);
+  }).filter(x => x._score > 0).sort((a, b) => b._score - a._score || a._d - b._d);
+}
+async function nameSearchMixed(q, lat, lng) {
+  return mixZones(await nameSearch(q, lat, lng), lat, lng, 8);
 }
 
 async function localSearch(q, lat, lng) {
-  const R = 25000, addr = parseAddress(q);
-  if (addr) { const found = await addressSearch(addr, lat, lng, R); if (found.length) return found; }
-  return nameSearch(q, lat, lng, R);
+  const addr = parseAddress(q);
+  if (addr) { const found = await addressSearch(addr, lat, lng); if (found.length) return found; }
+  return nameSearchMixed(q, lat, lng);
 }
 
-// Photon. Вне режима wide результаты жёстко ограничены рамкой ~45 км вокруг центра поиска, иначе вылезают Астана и Россия.
-async function photon(q, lat, lng, wide, limit) {
-  const dLat = 0.4, dLng = 0.4 / Math.max(0.3, Math.cos(lat * Math.PI / 180));
-  const area = wide ? `&lat=${lat}&lon=${lng}` : `&bbox=${(lng - dLng).toFixed(4)},${(lat - dLat).toFixed(4)},${(lng + dLng).toFixed(4)},${(lat + dLat).toFixed(4)}`;
+// Photon. Вне режима wide результаты жёстко ограничены рамками зон (Костанай ~40 км, Карабалык 20 км), иначе вылезают Астана и Россия.
+async function photonOne(q, area, limit) {
   const r = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${limit}${area}`, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(8000) });
   if (!r.ok) throw new Error("photon " + r.status);
   const j = await r.json();
@@ -479,6 +499,17 @@ async function photon(q, lat, lng, wide, limit) {
     const rest = [street !== name ? street : "", p.city || p.town || p.village || "", p.state || "", p.country || ""].filter(Boolean);
     return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], name, display_name: [name, ...rest].join(", ") };
   });
+}
+async function photon(q, lat, lng, wide, limit) {
+  if (wide) return photonOne(q, `&lat=${lat}&lon=${lng}`, limit);
+  // Две рамки: Костанай (~40 км) и Карабалык (20 км)
+  const areas = ZONES.map(z => {
+    const dLat = z.km / 111.3, dLng = dLat / Math.max(0.3, Math.cos(z.lat * Math.PI / 180));
+    return `&bbox=${(z.lng - dLng).toFixed(4)},${(z.lat - dLat).toFixed(4)},${(z.lng + dLng).toFixed(4)},${(z.lat + dLat).toFixed(4)}`;
+  });
+  const parts = await Promise.allSettled(areas.map(a => photonOne(q, a, limit)));
+  if (parts.every(p => p.status === "rejected")) throw parts[0].reason;
+  return mixZones(parts.flatMap(p => p.value || []), lat, lng, limit);
 }
 
 function searchParams(req) {
