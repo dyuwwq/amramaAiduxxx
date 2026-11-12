@@ -4,7 +4,7 @@
 const $ = id => document.getElementById(id);
 const KOST = { lat: 53.2144, lng: 63.6246 };
 // Зоны поиска (должны совпадать с ZONES в server.js): Костанай ~40 км, Карабалык 20 км
-const ZONES = [{ ...KOST, km: 40 }, { lat: 53.7589, lng: 61.0997, km: 20 }];
+const ZONES = [{ ...KOST, km: 40 }, { lat: 53.7524, lng: 62.0549, km: 20 }];
 const zoneBox = z => { const dLat = z.km / 111.3, dLng = dLat / Math.max(.3, Math.cos(z.lat * Math.PI / 180)); return `${z.lng - dLng},${z.lat + dLat},${z.lng + dLng},${z.lat - dLat}`; };
 const results = $('results'), actions = $('routeActions');
 

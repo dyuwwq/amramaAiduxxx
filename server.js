@@ -402,7 +402,7 @@ const KOSTANAY = { lat: 53.2144, lng: 63.6246 };
 // Зоны поиска: Костанай (рамка ~40 км) и посёлок Карабалык (20 км). ovKm: радиус для Overpass (он тяжелее Photon).
 const ZONES = [
   { name: "Костанай", lat: 53.2144, lng: 63.6246, km: 40, ovKm: 25 },
-  { name: "Карабалык", lat: 53.7589, lng: 61.0997, km: 20, ovKm: 20 }
+  { name: "Карабалык", lat: 53.7524, lng: 62.0549, km: 20, ovKm: 20 }
 ];
 const zonesNear = (lat, lng) => [...ZONES].sort((a, b) => haversine(lat, lng, a.lat, a.lng) / a.km - haversine(lat, lng, b.lat, b.lng) / b.km);
 const zoneOf = (lat, lng) => ZONES.indexOf(zonesNear(lat, lng)[0]);
