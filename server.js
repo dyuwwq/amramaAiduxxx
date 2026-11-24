@@ -399,22 +399,28 @@ app.get("/api/places", async (req, res) => {
 // ----- Локальный поиск: адреса и названия рядом с центром поиска (по умолчанию Костанай) -----
 const KOSTANAY = { lat: 53.2144, lng: 63.6246 };
 
-// Зоны поиска: Костанай (рамка ~40 км) и посёлок Карабалык (20 км). ovKm: радиус для Overpass (он тяжелее Photon).
+// Зоны поиска: Костанай (~40 км), Карабалык (20 км), Алматы и Астана (по 10 км). ovKm: радиус для Overpass (он тяжелее Photon).
 const ZONES = [
   { name: "Костанай", lat: 53.2144, lng: 63.6246, km: 40, ovKm: 25 },
-  { name: "Карабалык", lat: 53.7524, lng: 62.0549, km: 20, ovKm: 20 }
+  { name: "Карабалык", lat: 53.7524, lng: 62.0549, km: 20, ovKm: 20 },
+  { name: "Алматы", lat: 43.2389, lng: 76.8897, km: 10, ovKm: 10 },
+  { name: "Астана", lat: 51.1694, lng: 71.4491, km: 10, ovKm: 10 }
 ];
 const zonesNear = (lat, lng) => [...ZONES].sort((a, b) => haversine(lat, lng, a.lat, a.lng) / a.km - haversine(lat, lng, b.lat, b.lng) / b.km);
 const zoneOf = (lat, lng) => ZONES.indexOf(zonesNear(lat, lng)[0]);
 // Overpass: один и тот же селектор по всем зонам
-const aroundAll = sel => ZONES.map(z => `nwr(around:${z.ovKm * 1000},${z.lat},${z.lng})${sel};`).join("");
+const ovZones = (lat, lng) => zonesNear(lat, lng).slice(0, 2);
+const aroundAll = (sel, lat, lng) => ovZones(lat, lng).map(z => `nwr(around:${z.ovKm * 1000},${z.lat},${z.lng})${sel};`).join("");
 // Результаты из разных зон чередуем (сначала ближайшая к центру карты), чтобы Карабалык не вытеснялся Костанаем
 function mixZones(items, lat, lng, limit) {
   const groups = ZONES.map(() => []);
   for (const it of items) groups[zoneOf(it.lat, it.lon)].push(it);
-  const lists = zonesNear(lat, lng).map(z => groups[ZONES.indexOf(z)]), out = [];
-  for (let k = 0; out.length < limit && lists.some(l => k < l.length); k++)
-    for (const l of lists) if (k < l.length && out.length < limit) out.push(l[k]);
+  const lists = zonesNear(lat, lng).map(z => groups[ZONES.indexOf(z)]);
+  // половину мест отдаём ближайшему к центру карты городу, остальное делим по кругу между всеми зонами
+  const out = lists[0].slice(0, Math.ceil(limit / 2));
+  const rest = lists.map((l, i) => (i === 0 ? l.slice(out.length) : l));
+  for (let k = 0; out.length < limit && rest.some(l => k < l.length); k++)
+    for (const l of rest) if (k < l.length && out.length < limit) out.push(l[k]);
   return out;
 }
 
@@ -443,7 +449,7 @@ async function addressSearch(addr, lat, lng) {
   const st = addr.street.map(fuzzyWord).join(".*");
   const gap = /\d/.test(addr.sub) ? "{1,9}" : "{0,9}"; // между номером и цифровым корпусом разделитель обязателен (иначе 55/1 совпадёт с 551)
   const hn = addr.sub ? `^${addr.num}[^0-9]${gap}${fuzzyWord(addr.sub)}$` : `^${addr.num}([^0-9].*)?$`;
-  const data = await overpass(`[out:json][timeout:9];(${aroundAll(`["addr:street"~"${st}"]["addr:housenumber"~"${hn}"]`)}${ZONES.map(z => `way(around:${z.ovKm * 1000},${z.lat},${z.lng})["highway"]["name"~"${st}"];`).join("")});out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:9];(${aroundAll(`["addr:street"~"${st}"]["addr:housenumber"~"${hn}"]`, lat, lng)}${ovZones(lat, lng).map(z => `way(around:${z.ovKm * 1000},${z.lat},${z.lng})["highway"]["name"~"${st}"];`).join("")});out center tags 150;`);
   const els = (data.elements || []).filter(e => coordsOf(e).lat != null);
   const houses = els.filter(e => e.tags?.["addr:housenumber"]).map(e => {
     const t = e.tags, c = coordsOf(e);
@@ -465,7 +471,7 @@ async function nameSearch(q, lat, lng) {
   const toks = words(q).slice(0, 4);
   if (!toks.length) return [];
   const res = toks.map(t => [t, ...(SYN[t] || [])].map(fuzzyWord).join("|"));
-  const data = await overpass(`[out:json][timeout:9];(${res.map(re => aroundAll(`["name"~"${re}"]`)).join("")});out center tags 150;`);
+  const data = await overpass(`[out:json][timeout:9];(${res.map(re => aroundAll(`["name"~"${re}"]`, lat, lng)).join("")});out center tags 150;`);
   const tests = res.map(re => new RegExp(re));
   return (data.elements || []).filter(e => coordsOf(e).lat != null).map(e => {
     const t = e.tags || {}, c = coordsOf(e);

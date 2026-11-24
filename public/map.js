@@ -3,8 +3,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const KOST = { lat: 53.2144, lng: 63.6246 };
-// Зоны поиска (должны совпадать с ZONES в server.js): Костанай ~40 км, Карабалык 20 км
-const ZONES = [{ ...KOST, km: 40 }, { lat: 53.7524, lng: 62.0549, km: 20 }];
+// Зоны поиска (должны совпадать с ZONES в server.js): Костанай ~40 км, Карабалык 20 км, Алматы и Астана по 10 км
+const ZONES = [{ ...KOST, km: 40 }, { lat: 53.7524, lng: 62.0549, km: 20 }, { lat: 43.2389, lng: 76.8897, km: 10 }, { lat: 51.1694, lng: 71.4491, km: 10 }];
+const CITIES = { kostanay: [63.6246, 53.2144, 12], karabalyk: [62.0549, 53.7524, 13], almaty: [76.8897, 43.2389, 12], astana: [71.4491, 51.1694, 12] };
 const zoneBox = z => { const dLat = z.km / 111.3, dLng = dLat / Math.max(.3, Math.cos(z.lat * Math.PI / 180)); return `${z.lng - dLng},${z.lat + dLat},${z.lng + dLng},${z.lat - dLat}`; };
 const results = $('results'), actions = $('routeActions');
 
@@ -276,7 +277,7 @@ async function nominatimLocal(q, wide) { // запасной вариант, е�
 function showResults(items) {
   results.style.display = 'block';
   if (!items.length) {
-    results.innerHTML = '<div class="result"><b>Рядом ничего не найдено</b><span>Искал в Костанае (около 40 км) и в Карабалыке (20 км). Попробуй написать иначе.</span></div><div class="result" id="wideBtn"><b>🌍 Искать по всему миру</b></div>';
+    results.innerHTML = '<div class="result"><b>Рядом ничего не найдено</b><span>Искал в Костанае, Карабалыке, Алматы и Астане. Попробуй написать иначе.</span></div><div class="result" id="wideBtn"><b>🌍 Искать по всему миру</b></div>';
     $('wideBtn').onclick = () => searchAddress(lastQ, true);
     return;
   }
@@ -447,6 +448,12 @@ function shareMap() {
   navigator.clipboard?.writeText(url).then(() => setStatus('Ссылка на карту скопирована')).catch(() => prompt('Скопируй ссылку:', url));
 }
 $('locateBtn').onclick = async () => { await locate(); if (destination && userPos) buildRoute(); };
+// Быстрый переход к городам: карта летит туда, дальше можно искать места и отметить «Я здесь» для маршрута
+document.querySelectorAll('[data-city]').forEach(b => b.onclick = () => {
+  const c = CITIES[b.dataset.city]; if (!c) return;
+  map.flyTo({ center: [c[0], c[1]], zoom: c[2], pitch: 0, duration: 1200 });
+  setStatus(`Карта: ${b.textContent.trim()}. Отметь «📌 Я здесь (на карте)» и найди место для маршрута`);
+});
 $('pickBtn').onclick = togglePick;
 $('arBtn').onclick = () => { location.href = 'ar-nav.html'; };
 $('shareBtn').onclick = shareMap;
